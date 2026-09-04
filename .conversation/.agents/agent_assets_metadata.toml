@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "ds97k3cKBYkyRUXBPEkt1"
+uri = "file://4trackVisual-ipad-upload-fix.patch"
+type = "unspecified"
+title = "iPad four-track upload fix"
+description = "Patch for Safari/iPadOS AudioContext exhaustion, multi-channel memory pressure, batch cleanup, and the existing audit type errors."
+logical_id = "47f726a3-63de-4eed-997d-b2b217bead91"
+content_hash = "sha256:98ffb17167ffc11f6e8eafeb45a4660d710019db23072a528a69db52d01f345f"
+size = 6020
+mtime_ms = 1788563241889
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/conversation:3508eaa8-6749-45a8-b864-6b5a463c99ec/47f726a3-63de-4eed-997d-b2b217bead91/b76a9e71-257a-4344-867d-9751ca7e81eb"
+storage_version_token = "1788563249600417"
+content_type = "application/octet-stream"

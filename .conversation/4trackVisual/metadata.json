@@ -1,0 +1,6 @@
+{
+  "name": "Deterministic 4-Track Stem Visualizer",
+  "description": "Deterministic 4-track audio stem visualizer running real-time 60 FPS stem RMS trigger detection with per-track threshold controls and multi-emitter canvas rendering.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "4Track Visual"
+description = "A browser-based four-track audio stem visualizer that decodes WAV, MP3, FLAC, OGG, M4A, AAC, and AIFF files, renders synchronized reactive visuals, and stays stable on iPad Safari during multi-stem uploads."
+version = "1.0.0"
+id = "artifacts/4track-visual"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22204
+
+[services.development]
+run = "pnpm --filter @workspace/4track-visual run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/4track-visual", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/4track-visual/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22204"
+BASE_PATH = "/"

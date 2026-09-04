@@ -1,0 +1,125 @@
+diff --git a/src/audio/audioDecoder.ts b/src/audio/audioDecoder.ts
+--- a/src/audio/audioDecoder.ts
++++ b/src/audio/audioDecoder.ts
+@@ -79,30 +79,11 @@ export async function decodeAudioFile(file: File): Promise<AudioBuffer> {
+     });
+   }
+ 
+-  // SECONDARY LAYER: Isolated background AudioContext (bypasses primary audio graph contention)
+-  try {
+-    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+-    if (AudioContextClass) {
+-      const isolatedCtx = new AudioContextClass();
+-      try {
+-        const isolatedBuf = await decodeWithContext(isolatedCtx, arrayBuffer.slice(0), DECODE_TIMEOUT_MS);
+-        if (isolatedBuf && isolatedBuf.length > 0) {
+-          const duration = performance.now() - decodeStart;
+-          logger.success(
+-            'DECODER',
+-            `Decoded "${file.name}" via isolated AudioContext in ${duration.toFixed(1)}ms (${isolatedBuf.numberOfChannels}ch, ${isolatedBuf.sampleRate}Hz)`
+-          );
+-          return isolatedBuf;
+-        }
+-      } finally {
+-        isolatedCtx.close().catch(() => {});
+-      }
+-    }
+-  } catch (isoErr) {
+-    logger.warn('DECODER', `Isolated context decode attempt failed for "${file.name}": ${String(isoErr)}`);
+-  }
+-
+-  // TERTIARY LAYER: Pure-JavaScript WAV / RF64 / BW64 engine (for non-standard DAW headers)
++  // SECONDARY LAYER: Pure-JavaScript WAV / RF64 / BW64 engine (for non-standard DAW headers)
++  //
++  // Do not create a second AudioContext here. Safari/iPadOS has a small and
++  // device-dependent hardware-context budget; creating a throwaway context for
++  // every failed decode can exhaust it while four stems are being loaded.
+   const isWav = isWavOrRf64Format(arrayBuffer) || file.name.toLowerCase().endsWith('.wav');
+@@ -122,7 +103,7 @@ export async function decodeAudioFile(file: File): Promise<AudioBuffer> {
+     }
+   }
+ 
+-  // QUATERNARY LAYER: Pure-JavaScript AIFF / AIFC engine
++  // TERTIARY LAYER: Pure-JavaScript AIFF / AIFC engine
+@@ -140,7 +121,7 @@ export async function decodeAudioFile(file: File): Promise<AudioBuffer> {
+     }
+   }
+ 
+-  // QUINARY LAYER: Corrupted ID3 / leading header frame strip (for MP3s)
++  // QUATERNARY LAYER: Corrupted ID3 / leading header frame strip (for MP3s)
+diff --git a/src/dsp/filterBank.ts b/src/dsp/filterBank.ts
+--- a/src/dsp/filterBank.ts
++++ b/src/dsp/filterBank.ts
+@@ -50,6 +50,12 @@ export async function processTrackBuffer(
+     throw new Error(`Audio buffer for "${fileName}" contains 0 audio samples.`);
+   }
+ 
++  // Playback and the visualizer only need mono. Downmix before taking channel
++  // references so the original multi-channel decode can be garbage-collected
++  // as soon as this function yields. Keeping a full stereo/5.1 buffer for every
++  // stem is enough to terminate Safari on memory-constrained iPads.
++  rawBuffer = downmixToMono(rawBuffer);
++
+   onProgress?.({
+diff --git a/src/App.tsx b/src/App.tsx
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -295,6 +295,8 @@ export default function App() {
+     try {
+       const updated = [...tracks];
+ 
++      let processedCount = 0;
++
+       for (const [key, file] of entries) {
+@@ -310,7 +312,7 @@ export default function App() {
+           await resumeSharedAudioContext().catch(() => {});
+ 
+           console.debug('Batch decoding track', trackIdx, file.name, file.size, file.type);
+-          const buffer = await decodeAudioFile(file);
++          let buffer: AudioBuffer | null = await decodeAudioFile(file);
+           const trackData = await processTrackBuffer(
+             buffer,
+@@ -319,6 +321,12 @@ export default function App() {
+             setProcessingProgress
+           );
+           updated[trackIdx] = trackData;
++          processedCount += 1;
++          // Release the decoder result before Safari starts the next native
++          // decode. This yield gives WebKit a chance to collect the temporary
++          // ArrayBuffer/channel data between stems.
++          buffer = null;
++          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+         } catch (perr) {
+@@ -339,7 +347,7 @@ export default function App() {
+         schedulerRef.current?.play(0);
+       }, 100);
+ 
+-      setExportSuccess(`Successfully processed ${entries.length} stem file(s) — visuals active!`);
++      setExportSuccess(`Successfully processed ${processedCount} of ${entries.length} stem file(s) — visuals active!`);
+diff --git a/src/diagnostics/auditRunner.ts b/src/diagnostics/auditRunner.ts
+--- a/src/diagnostics/auditRunner.ts
++++ b/src/diagnostics/auditRunner.ts
+@@ -182,7 +182,8 @@ export async function runDiagnosticAudit(
+       }
+ 
+       processedTracks.push(trackData);
+-      logger.info('DSP', `Track ${i + 1} (${stemNames[i]}) DSP complete: ${trackData.numFrames} frames @ 60 FPS, peak: ${trackData.peakRms.toFixed(3)}`);
++      const peakRms = trackData.timeline.reduce((peak, value) => Math.max(peak, value), 0);
++      logger.info('DSP', `Track ${i + 1} (${stemNames[i]}) DSP complete: ${trackData.numFrames} frames @ 60 FPS, peak: ${peakRms.toFixed(3)}`);
+@@ -214,8 +215,8 @@ export async function runDiagnosticAudit(
+     const scheduler = new UnifiedPlaybackScheduler();
+     scheduler.setTracks(processedTracks);
+ 
+-    if (scheduler.duration <= 0) {
+-      throw new Error(`Scheduler duration is 0 (${scheduler.duration}) after setting 4 tracks`);
++    if (scheduler.getDuration() <= 0) {
++      throw new Error(`Scheduler duration is 0 (${scheduler.getDuration()}) after setting 4 tracks`);
+@@ -235,8 +236,8 @@ export async function runDiagnosticAudit(
+       message: `Scheduler successfully coordinated 4 concurrent stems (initialFrame: ${initialFrame}, advanced: ${advancedFrame})`,
+       details: {
+-        duration: scheduler.duration.toFixed(2),
+-        totalFrames: scheduler.totalFrames,
++        duration: scheduler.getDuration().toFixed(2),
++        totalFrames: scheduler.getTotalFrames(),
+         frameAdvance: advancedFrame - initialFrame,
+       },
