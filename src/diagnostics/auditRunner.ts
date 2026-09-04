@@ -182,7 +182,8 @@ export async function runSystemAudit(): Promise<AuditSuiteResult> {
       }
 
       processedTracks.push(trackData);
-      logger.info('DSP', `Track ${i + 1} (${stemNames[i]}) DSP complete: ${trackData.numFrames} frames @ 60 FPS, peak: ${trackData.peakRms.toFixed(3)}`);
+      const peakRms = trackData.timeline.reduce((peak, value) => Math.max(peak, value), 0);
+      logger.info('DSP', `Track ${i + 1} (${stemNames[i]}) DSP complete: ${trackData.numFrames} frames @ 60 FPS, peak: ${peakRms.toFixed(3)}`);
     }
 
     const s3Duration = performance.now() - s3Start;
@@ -214,8 +215,8 @@ export async function runSystemAudit(): Promise<AuditSuiteResult> {
     const scheduler = new UnifiedPlaybackScheduler();
     scheduler.setTracks(processedTracks);
 
-    if (scheduler.duration <= 0) {
-      throw new Error(`Scheduler duration is 0 (${scheduler.duration}) after setting 4 tracks`);
+    if (scheduler.getDuration() <= 0) {
+      throw new Error(`Scheduler duration is 0 (${scheduler.getDuration()}) after setting 4 tracks`);
     }
 
     // Start playback test
@@ -235,8 +236,8 @@ export async function runSystemAudit(): Promise<AuditSuiteResult> {
       durationMs: s4Duration,
       message: `Scheduler successfully coordinated 4 concurrent stems (initialFrame: ${initialFrame}, advanced: ${advancedFrame})`,
       details: {
-        duration: scheduler.duration.toFixed(2),
-        totalFrames: scheduler.totalFrames,
+        duration: scheduler.getDuration().toFixed(2),
+        totalFrames: scheduler.getTotalFrames(),
         frameAdvance: advancedFrame - initialFrame,
       },
     });
