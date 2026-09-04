@@ -79,30 +79,11 @@ export async function decodeAudioFile(file: File): Promise<AudioBuffer> {
     });
   }
 
-  // SECONDARY LAYER: Isolated background AudioContext (bypasses primary audio graph contention)
-  try {
-    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (AudioContextClass) {
-      const isolatedCtx = new AudioContextClass();
-      try {
-        const isolatedBuf = await decodeWithContext(isolatedCtx, arrayBuffer.slice(0), DECODE_TIMEOUT_MS);
-        if (isolatedBuf && isolatedBuf.length > 0) {
-          const duration = performance.now() - decodeStart;
-          logger.success(
-            'DECODER',
-            `Decoded "${file.name}" via isolated AudioContext in ${duration.toFixed(1)}ms (${isolatedBuf.numberOfChannels}ch, ${isolatedBuf.sampleRate}Hz)`
-          );
-          return isolatedBuf;
-        }
-      } finally {
-        isolatedCtx.close().catch(() => {});
-      }
-    }
-  } catch (isoErr) {
-    logger.warn('DECODER', `Isolated context decode attempt failed for "${file.name}": ${String(isoErr)}`);
-  }
-
-  // TERTIARY LAYER: Pure-JavaScript WAV / RF64 / BW64 engine (for non-standard DAW headers)
+  // SECONDARY LAYER: Pure-JavaScript WAV / RF64 / BW64 engine (for non-standard DAW headers)
+  //
+  // Do not create a second AudioContext here. Safari/iPadOS has a small and
+  // device-dependent hardware-context budget; creating a throwaway context for
+  // every failed decode can exhaust it while four stems are being loaded.
   const isWav = isWavOrRf64Format(arrayBuffer) || file.name.toLowerCase().endsWith('.wav');
   if (isWav) {
     try {
@@ -122,7 +103,7 @@ export async function decodeAudioFile(file: File): Promise<AudioBuffer> {
     }
   }
 
-  // QUATERNARY LAYER: Pure-JavaScript AIFF / AIFC engine
+  // TERTIARY LAYER: Pure-JavaScript AIFF / AIFC engine
   const isAiff = isAiffFormat(arrayBuffer) || file.name.toLowerCase().endsWith('.aif') || file.name.toLowerCase().endsWith('.aiff');
   if (isAiff) {
     try {
@@ -140,7 +121,7 @@ export async function decodeAudioFile(file: File): Promise<AudioBuffer> {
     }
   }
 
-  // QUINARY LAYER: Corrupted ID3 / leading header frame strip (for MP3s)
+  // QUATERNARY LAYER: Corrupted ID3 / leading header frame strip (for MP3s)
   const strippedBuffer = tryStripId3OrFindMpegFrame(arrayBuffer);
   if (strippedBuffer && strippedBuffer.byteLength > 0) {
     try {
