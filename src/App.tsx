@@ -295,6 +295,8 @@ export default function App() {
     try {
       const updated = [...tracks];
 
+      let processedCount = 0;
+
       for (const [key, file] of entries) {
         const trackIdx = parseInt(key, 10);
         setProcessingProgress({
@@ -310,7 +312,7 @@ export default function App() {
           await resumeSharedAudioContext().catch(() => {});
 
           console.debug('Batch decoding track', trackIdx, file.name, file.size, file.type);
-          const buffer = await decodeAudioFile(file);
+          let buffer: AudioBuffer | null = await decodeAudioFile(file);
           const trackData = await processTrackBuffer(
             buffer,
             trackIdx,
@@ -319,6 +321,12 @@ export default function App() {
             setProcessingProgress
           );
           updated[trackIdx] = trackData;
+          processedCount += 1;
+          // Release the decoder result before Safari starts the next native
+          // decode. This yield gives WebKit a chance to collect the temporary
+          // ArrayBuffer/channel data between stems.
+          buffer = null;
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
         } catch (perr) {
           // Log and continue processing remaining stems rather than aborting entire batch
           console.error(`Failed to decode/process stem for track ${key}:`, perr);
@@ -339,7 +347,7 @@ export default function App() {
         schedulerRef.current?.play(0);
       }, 100);
 
-      setExportSuccess(`Successfully processed ${entries.length} stem file(s) — visuals active!`);
+      setExportSuccess(`Successfully processed ${processedCount} of ${entries.length} stem file(s) — visuals active!`);
       setTimeout(() => setExportSuccess(null), 4000);
     } catch (err) {
       console.error('Failed to batch upload stems:', err);
