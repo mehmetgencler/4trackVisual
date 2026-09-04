@@ -29,6 +29,7 @@ import { VisualizerCanvas } from './components/VisualizerCanvas';
 import { TrackCard } from './components/TrackCard';
 import { TransportBar } from './components/TransportBar';
 import { StemUploadModal } from './components/StemUploadModal';
+import { resumeSharedAudioContext } from './audio/audioContext';
 
 // Initial default configuration strictly following the system design specification
 const DEFAULT_CONFIGS: TrackVisualConfig[] = [
@@ -241,6 +242,10 @@ export default function App() {
     });
 
     try {
+      // Ensure shared AudioContext is resumed (avoids suspended-state decode failures)
+      await resumeSharedAudioContext().catch(() => {});
+
+      console.debug('Decoding single track', trackIndex, file.name, file.size, file.type);
       const buffer = await decodeAudioFile(file);
       const trackData = await processTrackBuffer(
         buffer,
@@ -300,15 +305,26 @@ export default function App() {
           detail: `Decoding ${file.name}...`,
         });
 
-        const buffer = await decodeAudioFile(file);
-        const trackData = await processTrackBuffer(
-          buffer,
-          trackIdx,
-          configs[trackIdx]?.name || `Track ${trackIdx + 1}`,
-          file.name,
-          setProcessingProgress
-        );
-        updated[trackIdx] = trackData;
+        try {
+          // Ensure shared AudioContext is resumed before each decode
+          await resumeSharedAudioContext().catch(() => {});
+
+          console.debug('Batch decoding track', trackIdx, file.name, file.size, file.type);
+          const buffer = await decodeAudioFile(file);
+          const trackData = await processTrackBuffer(
+            buffer,
+            trackIdx,
+            configs[trackIdx]?.name || `Track ${trackIdx + 1}`,
+            file.name,
+            setProcessingProgress
+          );
+          updated[trackIdx] = trackData;
+        } catch (perr) {
+          // Log and continue processing remaining stems rather than aborting entire batch
+          console.error(`Failed to decode/process stem for track ${key}:`, perr);
+          setExportError(perr instanceof Error ? perr.message : `Failed to process stem for track ${key}`);
+          // Continue to next file
+        }
       }
 
       alignTrackLengths(updated);
