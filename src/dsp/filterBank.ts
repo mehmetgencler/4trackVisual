@@ -50,6 +50,12 @@ export async function processTrackBuffer(
     throw new Error(`Audio buffer for "${fileName}" contains 0 audio samples.`);
   }
 
+  // Playback and the visualizer only need mono. Downmix before taking channel
+  // references so the original multi-channel decode can be garbage-collected
+  // as soon as this function yields. Keeping a full stereo/5.1 buffer for every
+  // stem is enough to terminate Safari on memory-constrained iPads.
+  rawBuffer = downmixToMono(rawBuffer);
+
   onProgress?.({
     stage: 'decoding',
     trackIndex,
